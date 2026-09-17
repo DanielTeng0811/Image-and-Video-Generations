@@ -1,0 +1,29 @@
+# macOS and editor metadata
+.DS_Store
+.vscode/
+.idea/
+
+# Python environments, caches, and test tooling
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter's automatically generated checkpoint notebooks
+**/.ipynb_checkpoints/
+
+# Lab 1 downloaded data and generated training artefacts
+/Lab1-DDPM/image_diffusion_todo/data/
+/Lab1-DDPM/image_diffusion_todo/results/
+/Lab1-DDPM/image_diffusion_todo/samples/
+/Lab1-DDPM/image_diffusion_todo/outputs/
+
+# Local configuration and logs
+.env
+.env.*
+!.env.example
+*.log
