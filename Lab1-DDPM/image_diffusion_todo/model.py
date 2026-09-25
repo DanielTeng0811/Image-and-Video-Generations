@@ -29,7 +29,17 @@ class DiffusionModule(nn.Module):
         # 2. Pass (x_t, timestep) into self.network, where the output should represent the clean sample x0_pred.
         # 3. Compute the loss as MSE(predicted x0_pred, ground-truth x0).
         ######################
-        loss = None
+        B = x0.shape[0]
+
+        t = self.var_scheduler.uniform_sample_t(B, x0.device)
+        x_t, _ = self.var_scheduler.add_noise(x0, t, eps=noise)
+
+        if class_label is not None:
+            x0_pred = self.network(x_t, t, class_label)
+        else:
+            x0_pred = self.network(x_t, t)
+
+        loss = F.mse_loss(x0_pred, x0)
         return loss
 
     def get_loss_mean(self, x0, class_label=None, noise=None):
@@ -40,7 +50,43 @@ class DiffusionModule(nn.Module):
         # 3. Compute the *true* posterior mean from the closed-form DDPM formula (using x0, x_t, and scheduler terms).
         # 4. Compute the loss as MSE(predicted mean, true mean).
         ######################
-        loss = None
+        B = x0.shape[0]
+
+        t = self.var_scheduler.uniform_sample_t(B, x0.device)
+        x_t, _ = self.var_scheduler.add_noise(x0, t, eps=noise)
+
+        if class_label is not None:
+            mean_pred = self.network(x_t, t, class_label)
+        else:
+            mean_pred = self.network(x_t, t)
+
+        beta_t = extract(self.var_scheduler.betas, t, x0)
+        alpha_t = extract(self.var_scheduler.alphas, t, x0)
+        alpha_bar_t = extract(self.var_scheduler.alphas_cumprod, t, x0)
+
+        t_prev = (t - 1).clamp(min=0)
+        alpha_bar_t_prev = extract(
+            self.var_scheduler.alphas_cumprod, t_prev, x0
+        )
+
+        is_t_zero = (t == 0).reshape(-1, 1, 1, 1)
+        alpha_bar_t_prev = torch.where(
+            is_t_zero,
+            torch.ones_like(alpha_bar_t_prev),
+            alpha_bar_t_prev,
+        )
+
+        true_mean = (
+            (alpha_bar_t_prev.sqrt() * beta_t / (1 - alpha_bar_t)) * x0
+            + (
+                alpha_t.sqrt()
+                * (1 - alpha_bar_t_prev)
+                / (1 - alpha_bar_t)
+            )
+            * x_t
+        )
+
+        loss = F.mse_loss(mean_pred, true_mean)
         return loss
     
     def get_loss(self, x0, class_label=None, noise=None):
