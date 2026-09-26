@@ -82,6 +82,18 @@ def main(args):
     )
 
     ddpm = DiffusionModule(network, var_scheduler, predictor=config.predictor)
+    resume_checkpoint = None
+    if config.resume_ckpt is not None:
+        resume_checkpoint = ddpm.load(config.resume_ckpt)
+
+        checkpoint_mode = getattr(ddpm.var_scheduler, "schedule_mode", None)
+        if ddpm.predictor != config.predictor or checkpoint_mode != config.mode:
+            raise ValueError(
+                "The resume checkpoint does not match the requested "
+                f"predictor/mode ({config.predictor}/{config.mode})."
+            )
+        print(f"Resuming model weights from {config.resume_ckpt}")
+
     ddpm = ddpm.to(config.device)
 
     optimizer = torch.optim.Adam(ddpm.network.parameters(), lr=2e-4)
@@ -91,6 +103,36 @@ def main(args):
 
     step = 0
     losses = []
+    loss_filename = "loss.png"
+
+    if resume_checkpoint is not None:
+        training_state = resume_checkpoint.get("training_state")
+        if training_state is not None:
+            optimizer.load_state_dict(training_state["optimizer_state_dict"])
+            scheduler.load_state_dict(training_state["lr_scheduler_state_dict"])
+            step = training_state["step"]
+            losses = training_state.get("losses", [])
+            print(f"Restored optimizer, LR scheduler, and step {step}.")
+        else:
+            if config.resume_step is None:
+                raise ValueError(
+                    "This checkpoint has no training state. Pass --resume_step "
+                    "to specify how many completed steps it represents."
+                )
+            step = config.resume_step
+            # Older checkpoints contain model weights only, so their full loss
+            # history is unavailable. Save the resumed segment separately.
+            loss_filename = "loss_resume.png"
+            print(
+                f"Resuming from model weights at step {step}; optimizer and "
+                "loss history were not stored in this older checkpoint."
+            )
+
+        if step >= config.train_num_steps:
+            raise ValueError(
+                f"Resume step ({step}) must be smaller than train_num_steps "
+                f"({config.train_num_steps})."
+            )
     
     with tqdm(initial=step, total=config.train_num_steps) as pbar:
         while step < config.train_num_steps:
@@ -98,7 +140,7 @@ def main(args):
                 ddpm.eval()
                 
                 plt.plot(losses)
-                plt.savefig(f"{save_dir}/loss.png")
+                plt.savefig(save_dir / loss_filename)
                 plt.close()
                 
                 samples = ddpm.sample(4, return_traj=False)
@@ -110,7 +152,13 @@ def main(args):
                 traj = ddpm.sample(1, return_traj=True)  # traj
                 save_traj_strip(save_dir / f"step={step}-traj.png", traj, num_frames=10, pad=4)                            
                             
-                ddpm.save(f"{save_dir}/last.ckpt")
+                ddpm.save(
+                    save_dir / "last.ckpt",
+                    optimizer=optimizer,
+                    lr_scheduler=scheduler,
+                    step=step,
+                    losses=losses,
+                )
                 ddpm.train()
 
             img, label = next(train_it)
@@ -136,9 +184,15 @@ def main(args):
     # The in-loop checkpoint is only written every log_interval steps, so save
     # once more here or the last log_interval steps of training are discarded.
     plt.plot(losses)
-    plt.savefig(f"{save_dir}/loss.png")
+    plt.savefig(save_dir / loss_filename)
     plt.close()
-    ddpm.save(f"{save_dir}/last.ckpt")
+    ddpm.save(
+        save_dir / "last.ckpt",
+        optimizer=optimizer,
+        lr_scheduler=scheduler,
+        step=step,
+        losses=losses,
+    )
     print(f"Saved the final checkpoint at step {step} to {save_dir}/last.ckpt")
 
 
@@ -171,6 +225,18 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=63)
     parser.add_argument("--image_resolution", type=int, default=64)
     parser.add_argument("--sample_method", type=str, default="ddpm")
+    parser.add_argument(
+        "--resume_ckpt",
+        type=str,
+        default=None,
+        help="path to a last.ckpt checkpoint to continue training from",
+    )
+    parser.add_argument(
+        "--resume_step",
+        type=int,
+        default=None,
+        help="completed step count for an older checkpoint without training state",
+    )
     parser.add_argument("--use_cfg", action="store_true")
     parser.add_argument("--cfg_dropout", type=float, default=0.1)
     parser.add_argument("--predictor", type=str, default="noise",
@@ -184,4 +250,3 @@ if __name__ == "__main__":
     config = DotMap()
     config.update(vars(args))
     main(args)
-    

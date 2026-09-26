@@ -163,7 +163,13 @@ class DiffusionModule(nn.Module):
             return traj[-1]
 
 
-    def save(self, file_path):
+    def save(self, file_path, optimizer=None, lr_scheduler=None, step=None, losses=None):
+        """Save a model checkpoint, optionally including training state.
+
+        ``sampling.py`` only needs ``hparams`` and ``state_dict``.  Keeping
+        those keys unchanged preserves its compatibility, while the optional
+        training state lets ``train.py`` resume an interrupted run exactly.
+        """
         hparams = {
             "network": self.network,
             "var_scheduler": self.var_scheduler,
@@ -172,6 +178,13 @@ class DiffusionModule(nn.Module):
         state_dict = self.state_dict()
 
         dic = {"hparams": hparams, "state_dict": state_dict}
+        if optimizer is not None and lr_scheduler is not None and step is not None:
+            dic["training_state"] = {
+                "optimizer_state_dict": optimizer.state_dict(),
+                "lr_scheduler_state_dict": lr_scheduler.state_dict(),
+                "step": int(step),
+                "losses": list(losses) if losses is not None else [],
+            }
         torch.save(dic, file_path)
 
     def load(self, file_path):
@@ -185,3 +198,4 @@ class DiffusionModule(nn.Module):
         self.predictor = hparams.get("predictor", None)
 
         self.load_state_dict(state_dict)
+        return dic
