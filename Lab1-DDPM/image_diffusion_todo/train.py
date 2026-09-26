@@ -30,17 +30,30 @@ def main(args):
     config.update(vars(args))
     config.device = f"cuda:{args.gpu}"
     
+    output_root = Path(config.output_root).expanduser()
+    # A missing Drive mount would otherwise turn /content/drive/... into an
+    # ordinary temporary directory. Fail early instead of losing a long run.
+    if (
+        output_root.is_absolute()
+        and str(output_root).startswith("/content/drive/")
+        and not Path("/content/drive/MyDrive").is_dir()
+    ):
+        raise RuntimeError(
+            "Google Drive is not mounted. Run drive.mount('/content/drive') "
+            "before using an output_root under /content/drive/."
+        )
+
     now = get_current_time()
     if args.use_cfg:
-        save_dir = Path(
-            f"results/cfg_predictor_{args.predictor}/beta_{config.mode}/{now}"
+        save_dir = output_root / (
+            f"cfg_predictor_{args.predictor}/beta_{config.mode}/{now}"
         )
     else:
-        save_dir = Path(
-            f"results/predictor_{args.predictor}/beta_{config.mode}/{now}"
+        save_dir = output_root / (
+            f"predictor_{args.predictor}/beta_{config.mode}/{now}"
         )
     save_dir.mkdir(exist_ok=True, parents=True)
-    print(f"save_dir: {save_dir}")
+    print(f"save_dir: {save_dir.resolve()}")
 
     seed_everything(config.seed)
 
@@ -225,6 +238,12 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=63)
     parser.add_argument("--image_resolution", type=int, default=64)
     parser.add_argument("--sample_method", type=str, default="ddpm")
+    parser.add_argument(
+        "--output_root",
+        type=str,
+        default="results",
+        help="directory where run folders are saved; use a Drive absolute path in Colab",
+    )
     parser.add_argument(
         "--resume_ckpt",
         type=str,
